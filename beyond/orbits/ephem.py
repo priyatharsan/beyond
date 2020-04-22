@@ -66,6 +66,12 @@ class Ephem(Speaker):
         """
         return self._orbits[-1].date
 
+    @property
+    def dates(self):
+        """Generator yielding Dates of each Orbit object of the ephem
+        """
+        return (o.date for o in self)
+
     # @property
     # def steps(self):
     #     """Time intervals used in the ephemeris
@@ -107,10 +113,15 @@ class Ephem(Speaker):
             order (int): In case of ``LAGRANGE`` method is used
         Return:
             Orbit:
+        Raise:
+            ValueError: when date is not in the range of the ephemeris
+            ValueError: when the order of interpolation is insufficient
         """
 
         if not self.start <= date <= self.stop:
-            raise ValueError("Date '%s' not in range" % date)
+            raise ValueError(
+                "Date '{}' not in range [{}, {}]".format(date, self.start, self.stop)
+            )
 
         prev_idx = 0
         ephem = self
@@ -155,6 +166,9 @@ class Ephem(Speaker):
             date_subset = np.array([x.date.mjd for x in subset])
 
             result = np.zeros(6)
+
+            if len(subset) < order:
+                raise ValueError("len(ephem) < order : impossible to interpolate")
 
             # Everything is on wikipedia
             #        k
@@ -201,6 +215,8 @@ class Ephem(Speaker):
                 case.
         Yield:
             :py:class:`Orbit`:
+        Raise:
+            ValueError
 
         There is two ways to use the iter() method.
 
@@ -245,6 +261,8 @@ class Ephem(Speaker):
 
         listeners = kwargs.get("listeners", [])
 
+        self.clear_listeners(listeners)
+
         if dates:
             for date in dates:
                 orb = self.propagate(date)
@@ -261,7 +279,9 @@ class Ephem(Speaker):
                 start = self.start
             elif start < self.start:
                 if strict:
-                    raise ValueError("Start date not in range")
+                    raise ValueError(
+                        "Start date not in range [{}, {}]".format(self.start, self.stop)
+                    )
                 else:
                     real_start = self.start
 
@@ -272,7 +292,11 @@ class Ephem(Speaker):
                     stop = start + stop
                 if stop > self.stop:
                     if strict:
-                        raise ValueError("Stop date not in range")
+                        raise ValueError(
+                            "Stop date not in range [{}, {}]".format(
+                                self.start, self.stop
+                            )
+                        )
                     else:
                         stop = self.stop
 

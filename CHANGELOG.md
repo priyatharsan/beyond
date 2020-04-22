@@ -3,6 +3,48 @@
 This file tries to regroup all notable modifications of the ``beyond`` library.
 Each release is linked to a git commit.
 
+## [v0.6.9] - 2020-04-19
+
+### Added
+
+- OrbitInfo for hyperbolic orbits
+- Kepler and J2 analytical propagators
+- Beta angle computation
+- Constellation and LEO builder
+- Local Time at Ascending Node computation module
+- Real adaptive step size for KeplerNum propagator
+- Runge-Kutta-Fehlberg method for KeplerNum
+- Lambert's problem solver
+- ``ccsds`` now keeps track of "USER_DEFINED" fields
+
+### Modified
+
+- ZeroDoppler listeners renamed as RadialVelocity
+- The Kepler numerical propagator (now renamed as KeplerNum) use Ephem objects for interpolation
+- NonePropagator is not used anymore when ``orb.propagator = None`` and has to be explicitly passed
+- Hyperbolic orbits are much better now that their computations are simply done right
+- ``find_event`` uses ``events_iterator``, and Listeners are cleaned of residual states before each iterator creation
+- ``ccsds`` as a single subpackage and homogeneous internal functions
+
+## [v0.6.8] - 2019-12-08
+
+### Added
+
+- NonePropagator for unmoving objects
+- Eccentric anomaly form
+- AnomalyListener
+- find_event function
+- Add python 3.8 support
+- Add CCSDS XML parsing and dumping
+
+### Modified
+
+- Raise exception when not enough points to interpolate an ephemeris
+
+### Removed
+
+- Removed python 3.5 support
+
 ## [v0.6.7] - 2019-10-21
 
 ### Added

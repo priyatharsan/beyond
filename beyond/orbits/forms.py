@@ -5,7 +5,7 @@
 and their conversions
 """
 
-from numpy import cos, arccos, sin, arcsin, arctan2, sqrt, arccosh, sinh
+from numpy import cos, arccos, sin, arcsin, arctan2, sqrt, arctanh, sinh, cosh
 
 import numpy as np
 
@@ -20,12 +20,14 @@ class Form(Node):
     alt = {
         "theta": "θ",
         "phi": "φ",
+        "raan": "Ω",
         "Omega": "Ω",
         "omega": "ω",
         "nu": "ν",
         "theta_dot": "θ_dot",
         "phi_dot": "φ_dot",
         "aol": "u",
+        "H": "E",  # The hyperbolic anomaly is available under the eccentric anomaly
     }
 
     def __init__(self, name, param_names):
@@ -81,7 +83,7 @@ class Form(Node):
         K = v_norm ** 2 / 2 - center.µ / r_norm  # specific energy
         a = -center.µ / (2 * K)  # semi-major axis
         e = sqrt(1 - h_norm ** 2 / (a * center.µ))  # eccentricity
-        p = a * (1 - e ** 2)
+        p = a * (1 - e ** 2)  # semi parameter
         i = arccos(h[2] / h_norm)  # inclination
         Ω = arctan2(h[0], -h[1]) % (2 * np.pi)  # right ascension of the ascending node
 
@@ -115,10 +117,8 @@ class Form(Node):
         return np.array([x, y, z, vx, vy, vz], dtype=float)
 
     @classmethod
-    def _keplerian_to_keplerian_mean(cls, coord, center):
-        """Conversion from Keplerian to Keplerian Mean
-
-        The difference is the use of Mean anomaly instead of True anomaly
+    def _keplerian_to_keplerian_eccentric(cls, coord, center):
+        """Conversion from Keplerian to Keplerian Eccentric
         """
 
         a, e, i, Ω, ω, ν = coord
@@ -127,74 +127,104 @@ class Form(Node):
             cos_E = (e + cos(ν)) / (1 + e * cos(ν))
             sin_E = (sin(ν) * sqrt(1 - e ** 2)) / (1 + e * cos(ν))
             E = arctan2(sin_E, cos_E) % (2 * np.pi)
-            M = E - e * sin(E)  # Mean anomaly
         else:
-            # Hyperbolic case
-            H = arccosh((e + cos(ν)) / (1 + e * cos(ν)))
-            M = e * sinh(H) - H
+            # Hyperbolic case, E usually marked as H
+            cosh_E = (e + cos(ν)) / (1 + e * cos(ν))
+            sinh_E = (sin(ν) * sqrt(e ** 2 - 1)) / (1 + e * cos(ν))
+            E = arctanh(sinh_E / cosh_E)
+
+        return np.array([a, e, i, Ω, ω, E], dtype=float)
+
+    @classmethod
+    def _keplerian_eccentric_to_keplerian_mean(cls, coord, center):
+        """Conversion from Keplerian Eccentric to Keplerian Mean
+        """
+        a, e, i, Ω, ω, E = coord
+
+        if e < 1:
+            M = E - e * sin(E)
+        else:
+            # Hyperbolic case, E usually marked as H
+            M = e * sinh(E) - E
 
         return np.array([a, e, i, Ω, ω, M], dtype=float)
 
     @classmethod
-    def _keplerian_mean_to_keplerian(cls, coord, center):
-        """Conversion from Mean Keplerian to True Keplerian
+    def _keplerian_mean_to_keplerian_eccentric(cls, coord, center):
+        """Conversion from Mean Keplerian to Keplerian Eccentric
         """
         a, e, i, Ω, ω, M = coord
-        E = cls._m_to_e(e, M)
-        cos_ν = (cos(E) - e) / (1 - e * cos(E))
-        sin_ν = (sin(E) * sqrt(1 - e ** 2)) / (1 - e * cos(E))
+        E = cls.M2E(e, M)
+
+        return np.array([a, e, i, Ω, ω, E], dtype=float)
+
+    @classmethod
+    def _keplerian_eccentric_to_keplerian(cls, coord, center):
+        """Conversion from Mean Keplerian to True Keplerian
+        """
+
+        a, e, i, Ω, ω, E = coord
+
+        if e < 1:
+            cos_ν = (cos(E) - e) / (1 - e * cos(E))
+            sin_ν = (sin(E) * sqrt(1 - e ** 2)) / (1 - e * cos(E))
+        else:
+            # Hyperbolic case, E usually marked as H
+            cos_ν = (cosh(E) - e) / (1 - e * cosh(E))
+            sin_ν = -(sinh(E) * sqrt(e ** 2 - 1)) / (1 - e * cosh(E))
 
         ν = arctan2(sin_ν, cos_ν) % (np.pi * 2)
 
         return np.array([a, e, i, Ω, ω, ν], dtype=float)
 
     @classmethod
-    def _m_to_e(cls, e, M):
-        """Conversion from Mean Anomaly to Eccentric anomaly
-
-        Procedures for solving Kepler's Equation, A. W. Odell and  R. H. Gooding,
-        Celestial Mechanics 38 (1986) 307-334
+    def M2E(cls, e, M):
+        """Conversion from Mean Anomaly to Eccentric anomaly,
+        or Hyperbolic anomaly.
+    
+        from Vallado
         """
 
-        k1 = 3 * np.pi + 2
-        k2 = np.pi - 1
-        k3 = 6 * np.pi - 1
-        A = 3 * k2 ** 2 / k1
-        B = k3 ** 2 / (6 * k1)
+        tol = 1e-8
 
-        m1 = float(M)
-        if abs(m1) < 1 / 6:
-            E = m1 + e * (6 * m1) ** (1 / 3) - m1
-        elif m1 < 0:
-            w = np.pi + m1
-            E = m1 + e * (A * w / (B - w) - np.pi - m1)
-        else:
-            w = np.pi - m1
-            E = m1 + e * (np.pi - A * w / (B - w) - m1)
-
-        e1 = 1 - e
-        risk_disabler = (e1 + E ** 2 / 6) >= 0.1
-
-        for i in range(2):
-            fdd = e * sin(E)
-            fddd = e * cos(E)
-
-            if risk_disabler:
-                f = (E - fdd) - m1
-                fd = 1 - fddd
+        if e < 1:
+            # Ellipse
+            if -np.pi < M < 0 or M > np.pi:
+                E = M - e
             else:
-                f = cls._e_e_sin_e(e, E) - m1
-                s = sin(E / 2)
-                fd = e1 + 2 * e * s ** 2
-            dee = f * fd / (0.5 * f * fdd - fd ** 2)
+                E = M + e
 
-            w = fd + 0.5 * dee * (fdd + dee * fddd / 3)
-            fd += dee * (fdd + 0.5 * dee * fddd)
-            E -= (f - dee * (fd - w)) / fd
+            def next_E(E, e, M):
+                return E + (M - E + e * sin(E)) / (1 - e * cos(E))
 
-        E += M - m1
+            E1 = next_E(E, e, M)
+            while abs(E1 - E) >= tol:
+                E = E1
+                E1 = next_E(E, e, M)
 
-        return E
+            return E1
+        else:
+            # Hyperbolic
+            if e < 1.6:
+                if -np.pi < M < 0 or M > np.pi:
+                    H = M - e
+                else:
+                    H = M + e
+            else:
+                if e < 3.6 and abs(M) > np.pi:
+                    H = M - np.sign(M) * e
+                else:
+                    H = M / (e - 1)
+
+            def next_H(H, e, M):
+                return H + (M - e * sinh(H) + H) / (e * cosh(H) - 1)
+
+            H1 = next_H(H, e, M)
+            while abs(H1 - H) >= tol:
+                H = H1
+                H1 = next_H(H, e, M)
+
+            return H1
 
     @classmethod
     def _e_e_sin_e(cls, e, E):
@@ -204,7 +234,7 @@ class Form(Node):
         x0 = np.nan
         while x != x0:
             d += 2
-            term *= -E ** 2 / (d * (d + 1))
+            term *= -(E ** 2) / (d * (d + 1))
             x0 = x
             x = x - term
         return x
@@ -312,6 +342,11 @@ KEPL_C = Form("keplerian_circular", ["a", "ex", "ey", "i", "Ω", "u"])
     * u : argument of latitude (ω + ν)
 """
 
+KEPL_E = Form("keplerian_eccentric", ["a", "e", "i", "Ω", "ω", "E"])
+"""Same as Keplerian, but replaces True anomaly with
+`Eccentric anomaly <https://en.wikipedia.org/wiki/Eccentric_anomaly>`__
+"""
+
 KEPL_M = Form("keplerian_mean", ["a", "e", "i", "Ω", "ω", "M"])
 """Same as Keplerian, but replaces True anomaly with
 `Mean anomaly <https://en.wikipedia.org/wiki/Mean_anomaly>`__
@@ -345,7 +380,7 @@ CART = Form("cartesian", ["x", "y", "z", "vx", "vy", "vz"])
 """Cartesian form"""
 
 
-SPHE + CART + KEPL + KEPL_M + TLE
+SPHE + CART + KEPL + KEPL_E + KEPL_M + TLE
 KEPL + KEPL_C
 
 
@@ -353,6 +388,7 @@ _cache = {
     "tle": TLE,
     "keplerian_circular": KEPL_C,
     "keplerian_mean": KEPL_M,
+    "keplerian_eccentric": KEPL_E,
     "keplerian": KEPL,
     "spherical": SPHE,
     "cartesian": CART,

@@ -3,8 +3,9 @@
 """Date module
 """
 
-from datetime import datetime, timedelta, date
 from numpy import sin, radians
+from collections import namedtuple
+from datetime import datetime, timedelta, date
 
 from ..errors import DateError, UnknownScaleError
 from .eop import EopDb
@@ -49,7 +50,7 @@ class Timescale(Node):
         jd = mjd + Date.JD_MJD
         jj = Date._julian_century(jd)
         m = radians(357.5277233 + 35999.05034 * jj)
-        delta_lambda = radians(246.11 + 0.90251792 * (jd - 2451545.0))
+        delta_lambda = radians(246.11 + 0.90251792 * (jd - Date.J2000))
         return 0.001657 * sin(m) + 0.000022 * sin(delta_lambda)
 
     def offset(self, mjd, new_scale, eop):
@@ -147,6 +148,9 @@ class Date:
 
     JD_MJD = 2400000.5
     """Offset between JD and MJD"""
+
+    J2000 = 2451545.0
+    """Offset between JD and J2000"""
 
     REF_SCALE = "TAI"
     """Scale used as reference internally"""
@@ -375,7 +379,7 @@ class Date:
 
     @classmethod
     def _julian_century(cls, jd):
-        return (jd - 2451545.0) / 36525.0
+        return (jd - cls.J2000) / 36525.0
 
     @property
     def julian_century(self):
@@ -416,11 +420,15 @@ class Date:
 
     @classmethod
     def range(cls, start=None, stop=None, step=None, inclusive=False):
+        return DateRange(start, stop, step, inclusive)
+
+    @classmethod
+    def _range(cls, start=None, stop=None, step=None, inclusive=False):
         """Generator of a date range
 
         Args:
             start (Date):
-            stop (Date or datetime.timedelta)!
+            stop (Date or datetime.timedelta):
             step (timedelta):
         Keyword Args:
             inclusive (bool): If ``False``, the stopping date is not included.
@@ -456,6 +464,50 @@ class Date:
             date += step
 
 
+class DateRange:
+    """Object representing a Date.range call
+
+    Allow for manipulation of the range before any compytation
+    """
+
+    _descriptor = namedtuple("range_descriptor", "start stop step inclusive")
+
+    def __init__(self, start, stop, step, inclusive):
+        """
+
+        Args:
+            start (Date):
+            stop (Date or datetime.timedelta):
+            step (timedelta):
+            inclusive (bool): If ``False``, the stopping date is not included.
+                This is the same behavior as the built-in :py:func:`range`.
+        """
+
+        if isinstance(stop, timedelta):
+            stop = start + stop
+
+        self._range = self._descriptor(start, stop, step, inclusive)
+
+    def __iter__(self):
+        for d in Date._range(*self._range):
+            yield d
+
+    def __contains__(self, date):
+        return self.start <= date <= self.stop
+
+    @property
+    def start(self):
+        return self._range.start
+
+    @property
+    def stop(self):
+        return self._range.stop
+
+    @property
+    def step(self):
+        return self._range.step
+
+
 # This part is here to allow matplotlib to display Date objects directly
 # in the plot, without any other conversion by the developer
 # If matplotlib is importable, then a converter class is registered
@@ -483,3 +535,4 @@ else:  # pragma: no cover
             return values
 
     munits.registry.setdefault(Date, DateConverter())
+    munits.registry.setdefault(DateRange, DateConverter())
